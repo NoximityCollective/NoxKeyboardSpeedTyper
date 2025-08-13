@@ -140,7 +140,7 @@ export default function Home() {
   const [username, setUsername] = useState("");
   const [saving, setSaving] = useState(false);
   const [scores, setScores] = useState<
-    { username: string; wpm: number; duration?: number }[]
+    { username: string; wpm: number; accuracy?: number; duration?: number }[]
   >([]);
   const [dbSource, setDbSource] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
@@ -162,6 +162,11 @@ export default function Home() {
     for (let i = 0; i < typed.length; i++) if (typed[i] === sample[i]) c++;
     return c;
   }, [typed, sample]);
+
+  const accuracy = useMemo(() => {
+    if (typed.length === 0) return 100;
+    return Math.round((correctChars / typed.length) * 100);
+  }, [correctChars, typed.length]);
 
   const elapsedMs = useMemo(
     () => (started ? Date.now() - started : 0),
@@ -203,6 +208,17 @@ export default function Home() {
     },
     [finished, started],
   );
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+  }, []);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Prevent Ctrl+V, Cmd+V, and other paste shortcuts
+    if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+      e.preventDefault();
+    }
+  }, []);
 
   const setLen = useCallback((len: 15 | 30 | 60) => {
     setDuration(len);
@@ -253,6 +269,7 @@ export default function Home() {
         body: JSON.stringify({
           username: username.trim(),
           wpm: Math.min(wpm, 400),
+          accuracy,
           duration,
         }),
       });
@@ -303,7 +320,7 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+          <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
             <div className="px-3 py-2 rounded-xl border border-white/10 bg-white/5">
               Time
               <div className="font-mono text-lg text-blue-300">
@@ -312,7 +329,11 @@ export default function Home() {
             </div>
             <div className="px-3 py-2 rounded-xl border border-white/10 bg-white/5 text-right">
               WPM
-              <div className="font-mono text-lg text-green-300">{wpm}</div>
+              <div className="font-mono text-lg text-emerald-300">{wpm}</div>
+            </div>
+            <div className="px-3 py-2 rounded-xl border border-white/10 bg-white/5 text-right">
+              Accuracy
+              <div className="font-mono text-lg text-blue-300">{accuracy}%</div>
             </div>
           </div>
 
@@ -356,6 +377,8 @@ export default function Home() {
               ref={inputRef}
               value={typed}
               onChange={onKey}
+              onPaste={handlePaste}
+              onKeyDown={handleKeyDown}
               disabled={finished}
               className="opacity-0 pointer-events-none w-px h-px"
               aria-hidden
@@ -383,7 +406,8 @@ export default function Home() {
             {finished && (
               <div className="flex items-center gap-2">
                 <span className="text-base">
-                  Nice job! 🎈 <span className="font-mono">{wpm} wpm</span>
+                  Nice job! 🎈 <span className="font-mono">{wpm} wpm</span> •{" "}
+                  <span className="font-mono">{accuracy}%</span>
                 </span>
                 <input
                   value={username}
@@ -413,7 +437,12 @@ export default function Home() {
                 >
                   <span className="font-mono opacity-70">#{i + 1}</span>
                   <span className="truncate mx-3">{s.username}</span>
-                  <span className="font-mono">{s.wpm} wpm</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono">{s.wpm} wpm</span>
+                    <span className="font-mono text-blue-300">
+                      {s.accuracy || 100}%
+                    </span>
+                  </div>
                 </li>
               ))}
               {scores.length === 0 && (
