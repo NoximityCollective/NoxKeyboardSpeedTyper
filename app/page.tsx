@@ -573,11 +573,9 @@ export default function Home() {
     }
   }, [finished, username, wpm, loadScores]);
 
-  // render helpers
-  const caretIndex = typed.length;
+  // render helpers - stable character rendering to prevent layout jumps
   const chars = sample.split("");
-  const typedChars = chars.slice(0, caretIndex);
-  const restChars = chars.slice(caretIndex);
+  const caretIndex = typed.length;
 
   return (
     <div className="min-h-screen p-4 sm:p-6 flex items-center justify-center">
@@ -639,7 +637,10 @@ export default function Home() {
             <p className="text-sm text-foreground/70 mb-3">
               Click here and start typing. Keep a steady rhythm. ✨
             </p>
-            <div className="relative font-mono leading-9 text-[18px] sm:text-xl select-none break-words whitespace-pre-wrap">
+            <div
+              className="relative font-mono leading-relaxed text-[18px] sm:text-xl select-none"
+              style={{ letterSpacing: "0.05em" }}
+            >
               {pasteAttempts > 0 && (
                 <div className="absolute top-2 right-2 bg-red-500/90 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse z-10">
                   ⚠️ Paste Blocked ({pasteAttempts})
@@ -662,27 +663,53 @@ export default function Home() {
                   </span>
                 </div>
               )}
+
               {sample ? (
-                <>
-                  {typedChars.map((ch, i) => {
-                    const t = typed[i];
-                    const cls =
-                      t === ch ? "text-emerald-400" : "text-orange-400";
-                    return (
-                      <span key={i} className={cls}>
-                        {t}
-                      </span>
-                    );
+                <div className="break-words whitespace-pre-wrap">
+                  {chars.map((ch, i) => {
+                    if (i < typed.length) {
+                      // Character has been typed
+                      const typedChar = typed[i];
+                      const isCorrect = typedChar === ch;
+                      return (
+                        <span
+                          key={`char-${i}`}
+                          className={
+                            isCorrect
+                              ? "text-emerald-400"
+                              : "text-orange-400 bg-red-500/20 rounded px-[1px]"
+                          }
+                          style={{ minWidth: "0.6em", display: "inline-block" }}
+                        >
+                          {typedChar}
+                        </span>
+                      );
+                    } else if (i === typed.length && !finished && !isBlocked) {
+                      // Current cursor position - character with cursor
+                      return (
+                        <span
+                          key={`char-${i}`}
+                          className="relative inline-block bg-cyan-400/20 rounded"
+                          style={{ minWidth: "0.6em" }}
+                        >
+                          <span className="text-foreground/60">{ch}</span>
+                          <span className="absolute inset-y-0 left-0 w-[3px] bg-cyan-400 animate-pulse rounded-full" />
+                        </span>
+                      );
+                    } else {
+                      // Untyped character
+                      return (
+                        <span
+                          key={`char-${i}`}
+                          className="text-foreground/40"
+                          style={{ minWidth: "0.6em", display: "inline-block" }}
+                        >
+                          {ch}
+                        </span>
+                      );
+                    }
                   })}
-                  {!finished && !isBlocked && (
-                    <span className="inline-block w-[3px] h-[1.2em] -mb-[0.1em] align-[-0.2em] bg-cyan-400 animate-pulse mx-[1px] rounded" />
-                  )}
-                  {restChars.map((ch, i) => (
-                    <span key={`r${i}`} className="text-foreground/40">
-                      {ch}
-                    </span>
-                  ))}
-                </>
+                </div>
               ) : (
                 <span className="text-foreground/60">Loading words…</span>
               )}
@@ -787,45 +814,6 @@ export default function Home() {
                 </li>
               )}
             </ol>
-          </div>
-
-          <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10">
-            <h3 className="text-sm font-bold text-red-400 mb-2">
-              🚫 Comprehensive Paste Protection
-            </h3>
-            <ul className="text-xs text-red-300 space-y-1">
-              <li>
-                • All paste shortcuts blocked (Ctrl+V, Cmd+V, Shift+Insert,
-                etc.)
-              </li>
-              <li>• Context menu paste disabled</li>
-              <li>• Drag & drop text blocked</li>
-              <li>• Input timing analysis active</li>
-              <li>• Browser dev tools paste detection</li>
-              <li>• Direct value manipulation blocked</li>
-              <li>• IME and composition text monitoring</li>
-              <li>• Console usage tracking</li>
-              <li>• Keystroke timing pattern analysis</li>
-              <li>• Automation/bot detection</li>
-              <li>• Clipboard API monitoring</li>
-            </ul>
-            <div className="flex justify-between items-center mt-3 text-xs">
-              <p className="text-red-200 font-medium">
-                This typing test requires manual typing only. Any attempt to
-                paste will be detected and blocked.
-              </p>
-              <div className="text-right">
-                <div className="text-yellow-300">
-                  Suspicious Activity: {suspiciousActivity}
-                </div>
-                {devToolsDetected && (
-                  <div className="text-orange-300">Dev Tools: Active</div>
-                )}
-                {automationDetected && (
-                  <div className="text-purple-300">Bot: Detected</div>
-                )}
-              </div>
-            </div>
           </div>
 
           <footer className="mt-8 text-sm text-foreground/70 flex items-center justify-between">
