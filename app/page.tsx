@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAntiPaste } from "./hooks/useAntiPaste";
 
 const SENTENCES: string[] = [
   "The quick brown fox jumps over the lazy dog.",
@@ -144,8 +145,25 @@ export default function Home() {
   >([]);
   const [dbSource, setDbSource] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Comprehensive anti-paste protection
+  const antiPaste = useAntiPaste(inputRef, {
+    maxPasteAttempts: 3,
+    blockDuration: 3000,
+    enableLogging: true,
+    onPasteDetected: (method) => {
+      console.warn(`Paste blocked via ${method}`);
+    },
+    onSuspiciousActivity: (activity) => {
+      console.warn(`Suspicious activity detected: ${activity}`);
+    },
+  });
+
+  // Legacy state tracking for input validation
+  const [lastInputTime, setLastInputTime] = useState<number>(0);
+  const lastValidLength = useRef<number>(0);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -202,33 +220,68 @@ export default function Home() {
 
   const onKey = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (finished) return;
+      if (finished || antiPaste.state.isBlocked) return;
+
+      const newValue = e.target.value;
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastInputTime;
+
+      // Use the anti-paste hook's input monitoring
+      const isValidInput = antiPaste.utils.monitorInputChange(newValue, typed);
+      if (!isValidInput) {
+        return;
+      }
+
+      // Additional validation for rapid input changes
+      if (newValue.length > typed.length + 1) {
+        console.warn(
+          "Invalid input change detected - too many characters added",
+        );
+        return;
+      }
+
+      // Validate timing between keystrokes (human typing patterns)
+      if (timeDiff < 30 && newValue.length > typed.length) {
+        console.warn("Typing too fast - possible automation");
+        return;
+      }
+
       if (!started) setStarted(Date.now());
-      setTyped(e.target.value);
+      setTyped(newValue);
+      setLastInputTime(currentTime);
+      lastValidLength.current = newValue.length;
     },
-    [finished, started],
+    [
+      finished,
+      started,
+      typed,
+      lastInputTime,
+      antiPaste.state.isBlocked,
+      antiPaste.utils,
+    ],
   );
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault();
-  }, []);
+  // Use the comprehensive anti-paste handlers
+  const handlePaste = antiPaste.handlers.onPaste;
+  const handleKeyDown = antiPaste.handlers.onKeyDown;
+  const handleInput = antiPaste.handlers.onInput;
+  const handleDrop = antiPaste.handlers.onDrop;
+  const handleContextMenu = antiPaste.handlers.onContextMenu;
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Prevent Ctrl+V, Cmd+V, and other paste shortcuts
-    if ((e.ctrlKey || e.metaKey) && e.key === "v") {
-      e.preventDefault();
-    }
-  }, []);
-
-  const setLen = useCallback((len: 15 | 30 | 60) => {
-    setDuration(len);
-    setSecondsLeft(len);
-    setSample(generateTextForDuration(len));
-    setTyped("");
-    setStarted(null);
-    setFinished(false);
-    inputRef.current?.focus();
-  }, []);
+  const setLen = useCallback(
+    (len: 15 | 30 | 60) => {
+      setDuration(len);
+      setSecondsLeft(len);
+      setSample(generateTextForDuration(len));
+      setTyped("");
+      setStarted(null);
+      setFinished(false);
+      antiPaste.utils.reset();
+      lastValidLength.current = 0;
+      inputRef.current?.focus();
+    },
+    [antiPaste.utils],
+  );
 
   const restart = useCallback(() => {
     setSample(generateTextForDuration(duration));
@@ -237,8 +290,10 @@ export default function Home() {
     setFinished(false);
     setSecondsLeft(duration);
     setUsername("");
+    antiPaste.utils.reset();
+    lastValidLength.current = 0;
     inputRef.current?.focus();
-  }, [duration]);
+  }, [duration, antiPaste.utils]);
 
   const loadScores = useCallback(async () => {
     try {
@@ -346,6 +401,18 @@ export default function Home() {
               Click here and start typing. Keep a steady rhythm. ✨
             </p>
             <div className="relative font-mono leading-9 text-[18px] sm:text-xl select-none break-words whitespace-pre-wrap">
+              {antiPaste.state.pasteAttempts > 0 && (
+                <div className="absolute top-2 right-2 bg-red-500/90 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse z-10">
+                  ⚠️ Paste Blocked ({antiPaste.state.pasteAttempts})
+                </div>
+              )}
+              {antiPaste.state.isBlocked && (
+                <div className="absolute inset-0 bg-red-500/20 border border-red-500 rounded-3xl flex items-center justify-center z-20">
+                  <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold">
+                    🚫 PASTE DETECTED - BLOCKED FOR 3 SECONDS
+                  </span>
+                </div>
+              )}
               {sample ? (
                 <>
                   {typedChars.map((ch, i) => {
@@ -358,7 +425,7 @@ export default function Home() {
                       </span>
                     );
                   })}
-                  {!finished && (
+                  {!finished && !antiPaste.state.isBlocked && (
                     <span className="inline-block w-[3px] h-[1.2em] -mb-[0.1em] align-[-0.2em] bg-cyan-400 animate-pulse mx-[1px] rounded" />
                   )}
                   {restChars.map((ch, i) => (
@@ -379,9 +446,27 @@ export default function Home() {
               onChange={onKey}
               onPaste={handlePaste}
               onKeyDown={handleKeyDown}
-              disabled={finished}
+              onInput={handleInput}
+              onDrop={handleDrop}
+              onContextMenu={handleContextMenu}
+              onDragOver={(e) => e.preventDefault()}
+              disabled={finished || antiPaste.state.isBlocked}
               className="opacity-0 pointer-events-none w-px h-px"
               aria-hidden
+              autoComplete="off"
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              data-lpignore="true"
+              data-form-type="other"
+              style={
+                {
+                  userSelect: "none",
+                  WebkitUserSelect: "none",
+                  MozUserSelect: "none",
+                  msUserSelect: "none",
+                } as React.CSSProperties
+              }
             />
           </section>
 
@@ -392,16 +477,18 @@ export default function Home() {
                   inputRef.current?.focus();
                   if (!started) setStarted(Date.now());
                 }}
-                className="px-5 py-3 rounded-2xl border border-white/10 bg-blue-600 text-white font-semibold hover:bg-blue-500"
+                disabled={antiPaste.state.isBlocked}
+                className="px-5 py-3 rounded-2xl border border-white/10 bg-blue-600 text-white font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Start ▶
+                {antiPaste.state.isBlocked ? "Blocked" : "Start ▶"}
               </button>
             )}
             <button
               onClick={restart}
-              className="px-5 py-3 rounded-2xl border border-white/10 hover:bg-white/10 font-semibold"
+              disabled={antiPaste.state.isBlocked}
+              className="px-5 py-3 rounded-2xl border border-white/10 hover:bg-white/10 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Restart
+              {antiPaste.state.isBlocked ? "Blocked" : "Restart"}
             </button>
             {finished && (
               <div className="flex items-center gap-2">
@@ -451,6 +538,28 @@ export default function Home() {
                 </li>
               )}
             </ol>
+          </div>
+
+          <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10">
+            <h3 className="text-sm font-bold text-red-400 mb-2">
+              🚫 Comprehensive Paste Protection
+            </h3>
+            <ul className="text-xs text-red-300 space-y-1">
+              <li>
+                • All paste shortcuts blocked (Ctrl+V, Cmd+V, Shift+Insert,
+                etc.)
+              </li>
+              <li>• Context menu paste disabled</li>
+              <li>• Drag & drop text blocked</li>
+              <li>• Input timing analysis active</li>
+              <li>• Browser dev tools paste detection</li>
+              <li>• IME and composition text monitoring</li>
+              <li>• DOM mutation observation</li>
+            </ul>
+            <p className="text-xs text-red-200 mt-2 font-medium">
+              This typing test requires manual typing only. Any attempt to paste
+              will be detected and blocked.
+            </p>
           </div>
 
           <footer className="mt-8 text-sm text-foreground/70 flex items-center justify-between">
