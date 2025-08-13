@@ -354,7 +354,7 @@ export default function Home() {
                       t === ch ? "text-emerald-400" : "text-orange-400";
                     return (
                       <span key={i} className={cls}>
-                        {ch}
+                        {t}
                       </span>
                     );
                   })}
