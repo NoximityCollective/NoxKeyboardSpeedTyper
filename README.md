@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Keyboard Speed Typer
 
-## Getting Started
+*Master the art of typing with precision and speed.*
 
-First, run the development server:
+**By Noximity**
+
+---
+
+## What It Does
+
+A clean, focused typing trainer that helps you improve your words per minute through timed practice sessions. Choose your duration, start typing, and watch your speed improve.
+
+## Quick Start
 
 ```bash
+# Install dependencies
+npm install
+
+# Set up your database
+echo 'DB_URL="postgresql://username:password@host:port/database"' > .env.local
+
+# Initialize database
+npm run db:push
+
+# Start typing
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [localhost:3000](http://localhost:3000) and start practicing.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **15, 30, 60 second** practice sessions
+- **Real-time WPM** calculation
+- **Global leaderboard** with persistent scores
+- **Clean interface** designed for focus
 
-## Learn More
+## Commands
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Start development server |
+| `npm run build` | Build for production |
+| `npm run db:push` | Update database schema |
+| `npm run studio` | Open database browser |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Built with Next.js 15, React 19, TypeScript, Tailwind CSS, and Prisma.
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+MIT License - see [LICENSE](LICENSE) file.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+*Happy typing!* ⌨️

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -12,15 +12,35 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* Light mode is disabled; dark is default */
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Fun animated background accents */
+.bg-fun {
+  position: fixed;
+  inset: -10% -10% auto -10%;
+  pointer-events: none;
+  filter: blur(40px);
+  opacity: 0.35;
+  z-index: -1;
+}
+
+.bg-fun > div {
+  position: absolute;
+  border-radius: 9999px;
+  animation: floaty 12s ease-in-out infinite alternate;
+}
+
+.bg-fun .b1 { width: 280px; height: 280px; background: radial-gradient(circle, #60a5fa, transparent 60%); left: 10%; top: 5%; animation-delay: -2s; }
+.bg-fun .b2 { width: 320px; height: 320px; background: radial-gradient(circle, #f472b6, transparent 60%); right: 10%; top: 15%; animation-delay: -5s; }
+.bg-fun .b3 { width: 260px; height: 260px; background: radial-gradient(circle, #34d399, transparent 60%); left: 30%; top: 40%; animation-delay: -8s; }
+
+@keyframes floaty {
+  from { transform: translateY(0px) translateX(0px); }
+  to { transform: translateY(30px) translateX(20px); }
 }
