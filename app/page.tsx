@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAntiPaste } from "./hooks/useAntiPaste";
 
 const SENTENCES: string[] = [
   "The quick brown fox jumps over the lazy dog.",
@@ -148,28 +147,147 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Comprehensive anti-paste protection
-  const antiPaste = useAntiPaste(inputRef, {
-    maxPasteAttempts: 3,
-    blockDuration: 3000,
-    enableLogging: true,
-    onPasteDetected: (method) => {
-      console.warn(`Paste blocked via ${method}`);
-    },
-    onSuspiciousActivity: (activity) => {
-      console.warn(`Suspicious activity detected: ${activity}`);
-    },
-  });
-
-  // Legacy state tracking for input validation
+  // Comprehensive anti-paste protection state
+  const [pasteAttempts, setPasteAttempts] = useState<number>(0);
+  const [isBlocked, setIsBlocked] = useState<boolean>(false);
+  const [suspiciousActivity, setSuspiciousActivity] = useState<number>(0);
   const [lastInputTime, setLastInputTime] = useState<number>(0);
   const lastValidLength = useRef<number>(0);
+  const blockTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [devToolsDetected, setDevToolsDetected] = useState<boolean>(false);
+  const keystrokeTimings = useRef<number[]>([]);
+  const [automationDetected, setAutomationDetected] = useState<boolean>(false);
 
   useEffect(() => {
     const el = inputRef.current;
     el?.focus();
     // defer random text generation to client
     setSample(generateTextForDuration(60));
+
+    // Developer tools detection
+    const detectDevTools = () => {
+      const threshold = 160;
+      const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+      const heightThreshold =
+        window.outerHeight - window.innerHeight > threshold;
+
+      if (widthThreshold || heightThreshold) {
+        setDevToolsDetected(true);
+        setSuspiciousActivity((prev) => prev + 1);
+        console.warn("Developer tools detected - potential paste attempt");
+      }
+    };
+
+    // Monitor console usage
+    const originalLog = console.log;
+    console.log = function (...args) {
+      setSuspiciousActivity((prev) => prev + 1);
+      originalLog.apply(console, args);
+    };
+
+    // Comprehensive anti-paste protection
+    const preventContextMenu = (e: Event) => {
+      if (e.target === el) {
+        e.preventDefault();
+        console.warn("Context menu blocked");
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
+      }
+    };
+
+    const preventDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.warn("Drop event blocked");
+      setPasteAttempts((prev) => prev + 1);
+      setIsBlocked(true);
+      setTimeout(() => setIsBlocked(false), 3000);
+    };
+
+    const preventDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const globalPasteHandler = (e: ClipboardEvent) => {
+      if (
+        document.activeElement === el ||
+        (el && el.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.warn("Global paste event blocked");
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
+      }
+    };
+
+    // Advanced detection methods
+    const detectPasteFromValueChange = () => {
+      if (el) {
+        const originalDescriptor = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        );
+        Object.defineProperty(el, "value", {
+          set: function (newValue) {
+            if (newValue && newValue.length > this.value.length + 1) {
+              console.warn("Direct value manipulation detected");
+              setPasteAttempts((prev) => prev + 1);
+              setIsBlocked(true);
+              setTimeout(() => setIsBlocked(false), 3000);
+              return;
+            }
+            originalDescriptor?.set?.call(this, newValue);
+          },
+          get: function () {
+            return originalDescriptor?.get?.call(this);
+          },
+          configurable: true,
+        });
+
+        // Detect programmatic focus changes
+        const originalFocus = el.focus;
+        el.focus = function () {
+          setSuspiciousActivity((prev) => prev + 1);
+          console.warn("Programmatic focus detected");
+          originalFocus.call(this);
+        };
+
+        // Monitor for clipboard API usage
+        if (navigator.clipboard) {
+          const originalReadText = navigator.clipboard.readText;
+          navigator.clipboard.readText = function () {
+            setSuspiciousActivity((prev) => prev + 1);
+            console.warn("Clipboard API access detected");
+            return originalReadText.call(this);
+          };
+        }
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener("contextmenu", preventContextMenu);
+    document.addEventListener("drop", preventDrop);
+    document.addEventListener("dragover", preventDragOver);
+    document.addEventListener("paste", globalPasteHandler, true);
+    window.addEventListener("resize", detectDevTools);
+
+    // Set up advanced detection
+    detectPasteFromValueChange();
+    const devToolsInterval = setInterval(detectDevTools, 1000);
+
+    return () => {
+      document.removeEventListener("contextmenu", preventContextMenu);
+      document.removeEventListener("drop", preventDrop);
+      document.removeEventListener("dragover", preventDragOver);
+      document.removeEventListener("paste", globalPasteHandler, true);
+      window.removeEventListener("resize", detectDevTools);
+      clearInterval(devToolsInterval);
+      console.log = originalLog;
+    };
   }, []);
 
   // Dark theme is forced via <html className="dark"> in layout
@@ -220,29 +338,74 @@ export default function Home() {
 
   const onKey = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (finished || antiPaste.state.isBlocked) return;
+      if (finished || isBlocked) return;
 
       const newValue = e.target.value;
       const currentTime = Date.now();
       const timeDiff = currentTime - lastInputTime;
+      const lengthDiff = Math.abs(newValue.length - lastValidLength.current);
 
-      // Use the anti-paste hook's input monitoring
-      const isValidInput = antiPaste.utils.monitorInputChange(newValue, typed);
-      if (!isValidInput) {
+      // Record keystroke timing for pattern analysis
+      if (lastInputTime > 0) {
+        keystrokeTimings.current.push(timeDiff);
+        // Keep only last 20 timings
+        if (keystrokeTimings.current.length > 20) {
+          keystrokeTimings.current.shift();
+        }
+
+        // Detect automation patterns (too consistent timing)
+        if (keystrokeTimings.current.length >= 10) {
+          const avgTiming =
+            keystrokeTimings.current.reduce((a, b) => a + b) /
+            keystrokeTimings.current.length;
+          const variance =
+            keystrokeTimings.current.reduce(
+              (sum, time) => sum + Math.pow(time - avgTiming, 2),
+              0,
+            ) / keystrokeTimings.current.length;
+
+          // Human typing has natural variance; bots are too consistent
+          if (variance < 100 && avgTiming < 200) {
+            setAutomationDetected(true);
+            setSuspiciousActivity((prev) => prev + 1);
+            console.warn("Automation detected - too consistent timing pattern");
+          }
+        }
+      }
+
+      // Detect potential paste by checking for large input changes in short time
+      if (lengthDiff > 1 && timeDiff < 50) {
+        console.warn("Paste attempt detected via input analysis");
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
         return;
       }
 
-      // Additional validation for rapid input changes
+      // Validate that input is only growing by 1 character at a time (normal typing)
       if (newValue.length > typed.length + 1) {
         console.warn(
           "Invalid input change detected - too many characters added",
         );
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
         return;
       }
 
       // Validate timing between keystrokes (human typing patterns)
       if (timeDiff < 30 && newValue.length > typed.length) {
         console.warn("Typing too fast - possible automation");
+        setSuspiciousActivity((prev) => prev + 1);
+        return;
+      }
+
+      // Detect impossibly fast typing (superhuman speed)
+      if (timeDiff < 20 && newValue.length > typed.length) {
+        console.warn("Superhuman typing speed detected");
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
         return;
       }
 
@@ -251,37 +414,108 @@ export default function Home() {
       setLastInputTime(currentTime);
       lastValidLength.current = newValue.length;
     },
-    [
-      finished,
-      started,
-      typed,
-      lastInputTime,
-      antiPaste.state.isBlocked,
-      antiPaste.utils,
-    ],
+    [finished, started, typed, lastInputTime, isBlocked],
   );
 
-  // Use the comprehensive anti-paste handlers
-  const handlePaste = antiPaste.handlers.onPaste;
-  const handleKeyDown = antiPaste.handlers.onKeyDown;
-  const handleInput = antiPaste.handlers.onInput;
-  const handleDrop = antiPaste.handlers.onDrop;
-  const handleContextMenu = antiPaste.handlers.onContextMenu;
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.warn("Paste blocked via clipboard event");
+    setPasteAttempts((prev) => prev + 1);
+    setIsBlocked(true);
+    setTimeout(() => setIsBlocked(false), 3000);
+  }, []);
 
-  const setLen = useCallback(
-    (len: 15 | 30 | 60) => {
-      setDuration(len);
-      setSecondsLeft(len);
-      setSample(generateTextForDuration(len));
-      setTyped("");
-      setStarted(null);
-      setFinished(false);
-      antiPaste.utils.reset();
-      lastValidLength.current = 0;
-      inputRef.current?.focus();
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Comprehensive paste shortcut blocking
+    const isPasteShortcut =
+      ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") ||
+      (e.shiftKey && e.key === "Insert") ||
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v") ||
+      (e.altKey && e.shiftKey && e.key === "Insert") ||
+      ((e.ctrlKey || e.metaKey) && e.key === "y");
+
+    if (isPasteShortcut) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.warn(
+        "Paste shortcut blocked:",
+        e.key,
+        e.ctrlKey,
+        e.metaKey,
+        e.shiftKey,
+      );
+      setPasteAttempts((prev) => prev + 1);
+      setIsBlocked(true);
+      setTimeout(() => setIsBlocked(false), 3000);
+    }
+
+    // Track suspicious shortcuts
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      (e.key === "a" || e.key === "x" || e.key === "c")
+    ) {
+      setSuspiciousActivity((prev) => prev + 1);
+      console.log("Copy/cut/select-all detected");
+    }
+  }, []);
+
+  const handleInput = useCallback(
+    (e: React.FormEvent<HTMLInputElement>) => {
+      const inputType = (e as any).inputType;
+
+      // Detect insertFromPaste input type
+      if (inputType === "insertFromPaste") {
+        e.preventDefault();
+        console.warn("Paste detected via input type");
+        setPasteAttempts((prev) => prev + 1);
+        setIsBlocked(true);
+        setTimeout(() => setIsBlocked(false), 3000);
+      }
+
+      // Monitor for large value changes
+      const target = e.target as HTMLInputElement;
+      if (target.value.length > typed.length + 1) {
+        console.warn("Suspicious input event detected");
+        setPasteAttempts((prev) => prev + 1);
+      }
     },
-    [antiPaste.utils],
+    [typed.length],
   );
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.warn("Drop event blocked");
+    setPasteAttempts((prev) => prev + 1);
+    setIsBlocked(true);
+    setTimeout(() => setIsBlocked(false), 3000);
+  }, []);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (e.target === inputRef.current) {
+      e.preventDefault();
+      console.warn("Context menu blocked");
+      setPasteAttempts((prev) => prev + 1);
+    }
+  }, []);
+
+  const setLen = useCallback((len: 15 | 30 | 60) => {
+    setDuration(len);
+    setSecondsLeft(len);
+    setSample(generateTextForDuration(len));
+    setTyped("");
+    setStarted(null);
+    setFinished(false);
+    setPasteAttempts(0);
+    setIsBlocked(false);
+    setSuspiciousActivity(0);
+    setDevToolsDetected(false);
+    setAutomationDetected(false);
+    keystrokeTimings.current = [];
+    lastValidLength.current = 0;
+    inputRef.current?.focus();
+  }, []);
 
   const restart = useCallback(() => {
     setSample(generateTextForDuration(duration));
@@ -290,10 +524,15 @@ export default function Home() {
     setFinished(false);
     setSecondsLeft(duration);
     setUsername("");
-    antiPaste.utils.reset();
+    setPasteAttempts(0);
+    setIsBlocked(false);
+    setSuspiciousActivity(0);
+    setDevToolsDetected(false);
+    setAutomationDetected(false);
+    keystrokeTimings.current = [];
     lastValidLength.current = 0;
     inputRef.current?.focus();
-  }, [duration, antiPaste.utils]);
+  }, [duration]);
 
   const loadScores = useCallback(async () => {
     try {
@@ -401,12 +640,22 @@ export default function Home() {
               Click here and start typing. Keep a steady rhythm. ✨
             </p>
             <div className="relative font-mono leading-9 text-[18px] sm:text-xl select-none break-words whitespace-pre-wrap">
-              {antiPaste.state.pasteAttempts > 0 && (
+              {pasteAttempts > 0 && (
                 <div className="absolute top-2 right-2 bg-red-500/90 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse z-10">
-                  ⚠️ Paste Blocked ({antiPaste.state.pasteAttempts})
+                  ⚠️ Paste Blocked ({pasteAttempts})
                 </div>
               )}
-              {antiPaste.state.isBlocked && (
+              {devToolsDetected && (
+                <div className="absolute top-2 left-2 bg-orange-500/90 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse z-10">
+                  🔧 Dev Tools Detected
+                </div>
+              )}
+              {automationDetected && (
+                <div className="absolute top-12 left-2 bg-purple-500/90 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse z-10">
+                  🤖 Bot Detected
+                </div>
+              )}
+              {isBlocked && (
                 <div className="absolute inset-0 bg-red-500/20 border border-red-500 rounded-3xl flex items-center justify-center z-20">
                   <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold">
                     🚫 PASTE DETECTED - BLOCKED FOR 3 SECONDS
@@ -425,7 +674,7 @@ export default function Home() {
                       </span>
                     );
                   })}
-                  {!finished && !antiPaste.state.isBlocked && (
+                  {!finished && !isBlocked && (
                     <span className="inline-block w-[3px] h-[1.2em] -mb-[0.1em] align-[-0.2em] bg-cyan-400 animate-pulse mx-[1px] rounded" />
                   )}
                   {restChars.map((ch, i) => (
@@ -450,7 +699,7 @@ export default function Home() {
               onDrop={handleDrop}
               onContextMenu={handleContextMenu}
               onDragOver={(e) => e.preventDefault()}
-              disabled={finished || antiPaste.state.isBlocked}
+              disabled={finished || isBlocked}
               className="opacity-0 pointer-events-none w-px h-px"
               aria-hidden
               autoComplete="off"
@@ -477,18 +726,18 @@ export default function Home() {
                   inputRef.current?.focus();
                   if (!started) setStarted(Date.now());
                 }}
-                disabled={antiPaste.state.isBlocked}
+                disabled={isBlocked}
                 className="px-5 py-3 rounded-2xl border border-white/10 bg-blue-600 text-white font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {antiPaste.state.isBlocked ? "Blocked" : "Start ▶"}
+                {isBlocked ? "Blocked" : "Start ▶"}
               </button>
             )}
             <button
               onClick={restart}
-              disabled={antiPaste.state.isBlocked}
+              disabled={isBlocked}
               className="px-5 py-3 rounded-2xl border border-white/10 hover:bg-white/10 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {antiPaste.state.isBlocked ? "Blocked" : "Restart"}
+              {isBlocked ? "Blocked" : "Restart"}
             </button>
             {finished && (
               <div className="flex items-center gap-2">
@@ -553,13 +802,30 @@ export default function Home() {
               <li>• Drag & drop text blocked</li>
               <li>• Input timing analysis active</li>
               <li>• Browser dev tools paste detection</li>
+              <li>• Direct value manipulation blocked</li>
               <li>• IME and composition text monitoring</li>
-              <li>• DOM mutation observation</li>
+              <li>• Console usage tracking</li>
+              <li>• Keystroke timing pattern analysis</li>
+              <li>• Automation/bot detection</li>
+              <li>• Clipboard API monitoring</li>
             </ul>
-            <p className="text-xs text-red-200 mt-2 font-medium">
-              This typing test requires manual typing only. Any attempt to paste
-              will be detected and blocked.
-            </p>
+            <div className="flex justify-between items-center mt-3 text-xs">
+              <p className="text-red-200 font-medium">
+                This typing test requires manual typing only. Any attempt to
+                paste will be detected and blocked.
+              </p>
+              <div className="text-right">
+                <div className="text-yellow-300">
+                  Suspicious Activity: {suspiciousActivity}
+                </div>
+                {devToolsDetected && (
+                  <div className="text-orange-300">Dev Tools: Active</div>
+                )}
+                {automationDetected && (
+                  <div className="text-purple-300">Bot: Detected</div>
+                )}
+              </div>
+            </div>
           </div>
 
           <footer className="mt-8 text-sm text-foreground/70 flex items-center justify-between">
