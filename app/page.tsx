@@ -135,7 +135,7 @@ export default function Home() {
   const [sample, setSample] = useState("");
   const [typed, setTyped] = useState("");
   const [started, setStarted] = useState<number | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(duration);
+  const [secondsLeft, setSecondsLeft] = useState<number>(duration);
   const [finished, setFinished] = useState(false);
   const [username, setUsername] = useState("");
   const [saving, setSaving] = useState(false);
